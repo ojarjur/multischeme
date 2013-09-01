@@ -132,12 +132,13 @@
            done-handler)))
       (transform-tail-call body)))
 (define (transform-define-tail-call var value)
-  ((transform value)
-   (lambda (scheduler done-handler value-code)
-     `(,continuation ,scheduler ,done-handler
-                     (define ,(escape-symbol var) ,value-code)))
-   scheduler
-   done-handler))
+  (lambda (continuation scheduler done-handler)
+    ((transform value)
+     (lambda (scheduler done-handler value-code)
+       `(,continuation ,scheduler ,done-handler
+                       (define ,(escape-symbol var) ,value-code)))
+     scheduler
+     done-handler)))
 (define (transform-begin-tail-call statements)
   (cond ((not (pair? statements))
          (lambda (continuation scheduler done-handler)
