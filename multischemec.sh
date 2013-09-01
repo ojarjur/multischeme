@@ -33,7 +33,7 @@ fi
 
 if [ ! -e 'bin/multischemec' ]; then ./bootstrap.sh; fi
 if [[ "${SOURCE}" == "-" ]]; then
-    REWRITTEN_CODE=`bin/multischemec < /bin/stdin`
+    REWRITTEN_CODE=`bin/multischemec < /dev/stdin`
 else
     REWRITTEN_CODE=`bin/multischemec < ${SOURCE}`
 fi
