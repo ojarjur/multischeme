@@ -2,23 +2,7 @@
 ;; Sample Scheme program that computes the Nth prime number ;;
 ;; using sieve built from chaining filtering tasks          ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Functions for inter-process I/O. For simplicity, ;;
-;; we use fixed size, blocking mailboxes.           ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(define (make-mailbox) (cons #f '()))
-(define (send-message mailbox message)
-  (if (car mailbox)
-      (send-message mailbox message)
-      (begin (set-car! mailbox #t)
-             (set-cdr! mailbox message)
-             mailbox)))
-(define (recieve-message mailbox)
-  (if (car mailbox)
-      (begin (set-car! mailbox #f)
-             (cdr mailbox))
-      (recieve-message mailbox)))
+(load "samples/mailboxes.scm")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Processing threads ;;
