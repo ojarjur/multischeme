@@ -117,26 +117,25 @@
      scheduler
      done-handler)))
 (define (transform-let-tail-call bindings body)
-  (if (pair? bindings)
-      (lambda (continuation scheduler done-handler)
-        (let ((var (escape-symbol (caar bindings)))
-              (value-code (cadar bindings)))
-          ((transform value-code)
-           (lambda (scheduler done-handler value)
-             `(let ((,var ,value))
-                ,((transform-let-tail-call (cdr bindings) body)
-                  continuation
-                  scheduler
-                  done-handler)))
-           scheduler
-           done-handler)))
-      (transform-tail-call body)))
-(define (transform-define-tail-call var value)
   (lambda (continuation scheduler done-handler)
-    ((transform value)
-     (lambda (scheduler done-handler value-code)
-       `(,continuation ,scheduler ,done-handler
-                       (define ,(escape-symbol var) ,value-code)))
+    ((transform-bindings bindings)
+     (lambda (scheduler done-handler bindings-code)
+       `(let ,bindings-code
+          ,((transform-tail-call body)
+            continuation
+            scheduler
+            done-handler)))
+     scheduler
+     done-handler)))
+(define (transform-letrec-tail-call bindings body)
+  (lambda (continuation scheduler done-handler)
+    ((transform-bindings bindings)
+     (lambda (scheduler done-handler bindings-code)
+       `(letrec ,bindings-code
+          ,((transform-tail-call body)
+            continuation
+            scheduler
+            done-handler)))
      scheduler
      done-handler)))
 (define (transform-begin-tail-call statements)
@@ -172,8 +171,8 @@
          (transform-lambda-tail-call (cadr expr) (caddr expr)))
         ((eq? (car expr) 'let)
          (transform-let-tail-call (cadr expr) (caddr expr)))
-        ((eq? (car expr) 'define)
-         (transform-define-tail-call (cadr expr) (caddr expr)))
+        ((eq? (car expr) 'letrec)
+         (transform-letrec-tail-call (cadr expr) (caddr expr)))
         ((eq? (car expr) 'begin)
          (transform-begin-tail-call (cdr expr)))
         ((eq? (car expr) 'set!)
@@ -245,6 +244,23 @@
 	   (builder scheduler done-handler (cons op args-code))))
      scheduler
      done-handler)))
+(define (transform-bindings bindings)
+  (if (pair? bindings)
+      (let ((var (caar bindings))
+            (value (cadar bindings)))
+        (lambda (builder scheduler done-handler)
+          ((transform value)
+           (lambda (scheduler done-handler value-code)
+             ((transform-bindings (cdr bindings))
+              (lambda (scheduler done-handler bindings-code)
+                (builder scheduler done-handler
+                         (cons `(,var ,value-code) bindings-code)))
+              scheduler
+              done-handler))
+           scheduler
+           done-handler)))
+      (lambda (builder scheduler done-handler)
+        (builder scheduler done-handler '()))))
 (define (transform-let bindings body)
   (lambda (builder scheduler done-handler)
     (let ((continuation (get-next-symbol))
@@ -255,13 +271,16 @@
            continuation
            scheduler
            done-handler)))))
-(define (transform-define var value)
-  ((transform value)
-   (lambda (scheduler done-handler value-code)
-     (builder scheduler done-handler
-              `(define ,(escape-symbol var) ,value-code)))
-   scheduler
-   done-handler))
+(define (transform-letrec bindings body)
+  (lambda (builder scheduler done-handler)
+    (let ((continuation (get-next-symbol))
+          (value (get-next-symbol)))
+      `(let ((,continuation (lambda (,scheduler ,done-handler ,value)
+                              ,(builder scheduler done-handler value))))
+         ,((transform-letrec-tail-call bindings body)
+           continuation
+           scheduler
+           done-handler)))))
 (define (transform-begin statements)
   (cond ((not (pair? statements))
          (lambda (builder scheduler done-handler)
@@ -299,8 +318,8 @@
          (transform-lambda (cadr expr) (caddr expr)))
         ((eq? (car expr) 'let)
          (transform-let (cadr expr) (caddr expr)))
-        ((eq? (car expr) 'define)
-         (transform-define (cadr expr) (caddr expr)))
+        ((eq? (car expr) 'letrec)
+         (transform-letrec (cadr expr) (caddr expr)))
         ((eq? (car expr) 'begin)
          (transform-begin (cdr expr)))
         ((eq? (car expr) 'set!)
