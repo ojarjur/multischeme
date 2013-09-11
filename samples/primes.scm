@@ -8,14 +8,14 @@
 ;; Processing threads ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;
 (define (filter-composites prime mailbox child-mailbox)
-  (let ((next-number (recieve-message mailbox)))
+  (let ((next-number (receive-message mailbox)))
     (if (= (remainder next-number prime) 0)
         (filter-composites prime mailbox child-mailbox)
         (begin (send-message child-mailbox next-number)
                (filter-composites prime mailbox child-mailbox)))))
 (define (filter-task mailbox primes-mailbox)
   (make-task (lambda ()
-               (let ((prime (recieve-message mailbox)))
+               (let ((prime (receive-message mailbox)))
                  (begin (send-message primes-mailbox prime)
                         (let ((child-mailbox (make-mailbox)))
                           (let ((child (filter-task child-mailbox
@@ -29,7 +29,7 @@
   (make-task (lambda () (drive 2 mailbox))))
 (define (read-primes count primes-mailbox)
   (if (> count 0)
-      (cons (recieve-message primes-mailbox)
+      (cons (receive-message primes-mailbox)
             (read-primes (- count 1) primes-mailbox))
       '()))
 (let ((numbers-mailbox (make-mailbox))

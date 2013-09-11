@@ -31,14 +31,14 @@
         (begin (set-car! (cddr mailbox) (+ insert-position 1))
                (vector-set! store (remainder insert-position size) message)
                mailbox))))
-(define (recieve-message mailbox)
+(define (receive-message mailbox)
   (let ((store (car mailbox))
         (read-start (cadr mailbox))
         (insert-position (caddr mailbox))
         (size (cadddr mailbox)))
     (if (= read-start insert-position)
         ;; The fixed size buffer is empty. Wait and check again.
-        (recieve-message mailbox)
+        (receive-message mailbox)
         ;; Send a message, the entire following block is atomic,
         ;; so we don't have to worry about read-modify-write conflicts.
         (begin (set-car! (cdr mailbox) (+ read-start 1))
