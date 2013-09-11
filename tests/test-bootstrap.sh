@@ -2,7 +2,7 @@
 function run_test() {
     echo 'Testing bootstrapping of the transformation'
     ./bootstrap.sh
-    bin/multischemec < src/main.scm | csc - -o bin/multischemec2
+    bin/multischemec < src/main.scm | csc - -w -o bin/multischemec2
     OUTPUT=`diff <(bin/multischemec < src/main.scm) <(bin/multischemec2 < src/main.scm)`
     if [ -z "$OUTPUT" ]; then
         echo $'\tPassed'

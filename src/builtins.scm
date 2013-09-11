@@ -19,7 +19,14 @@
 ;; implementation, but which should not be treated as atomic primitives. ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define builtins
-  '((define (map proc elements)
+  '((define (reverse elements)
+      (define (rreverse remaining-elements result)
+        (if (pair? remaining-elements)
+            (rreverse (cdr remaining-elements)
+                      (cons (car remaining-elements) result))
+            result))
+      (rreverse elements '()))
+    (define (map proc elements)
       (if (pair? elements)
           (cons (proc (car elements))
                 (map proc (cdr elements)))
