@@ -32,7 +32,7 @@
         open-output-file open-input-file
         close-output-port close-input-port))
 (define extended-primitives
-  '(exit call/cc call-with-current-continuation
+  '(exit call/cc call-with-current-continuation with-exception-handler
          map for-each call-with-input-file call-with-output-file
          make-task task? task-live? task-kill))
 (define (escape-symbol symbol)
@@ -369,6 +369,30 @@
 		  (lambda (dropped scheduler done-handler value)
 		    (continuation scheduler done-handler value)))))
     (define _call/cc _call-with-current-continuation)
+    (define (_wrap-exception-handler handler continuation)
+      (lambda (k scheduler done-handler)
+        (lambda (ex)
+          (k (handler continuation scheduler done-handler ex)))))
+    (define (_wrap-scheduler-with-handler scheduler wrapped-handler)
+      (lambda (callback)
+        (scheduler (lambda (scheduler done-handler)
+                     (call/cc (lambda (k)
+                                (with-exception-handler
+                                 (wrapped-handler k scheduler done-handler)
+                                 (lambda () (callback scheduler
+                                                      done-handler)))))))))
+    (define _with-exception-handler
+      (lambda (continuation scheduler done-handler exception-handler thunk)
+        (let ((wrapped-handler (_wrap-exception-handler exception-handler
+                                                        continuation)))
+          (call/cc (lambda (k)
+                     (with-exception-handler
+                      (wrapped-handler k scheduler done-handler)
+                      (lambda ()
+                        (thunk continuation
+                               (_wrap-scheduler-with-handler scheduler
+                                                             wrapped-handler)
+                               done-handler))))))))
 
     (define (_definition-done-handler value) value)
     (define (_definition-scheduler callback)
