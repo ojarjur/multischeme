@@ -50,6 +50,17 @@ form atomic blocks:
       consider to be atomic should include all procedures from the standard
       whose running time is not based on the size of its arguments).
 
+Prerequisites
+-------------
+
+This implementation assumes the backing Scheme implementation supports
+SRFI 9, which adds support for record types, and SRFI 34, which adds
+support for exception handling.
+
+Those assumptions are baked into this specific implementations, but the
+same multitasking primitives could be implemented without requiring those
+extensions.
+
 Implementation
 --------------
 
