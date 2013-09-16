@@ -38,7 +38,7 @@ else
     REWRITTEN_CODE=`bin/multischemec < ${SOURCE}`
 fi
 if [[ -n "${DESTINATION}" ]]; then
-    echo ${REWRITTEN_CODE} | csc -w - -o ${DESTINATION}
+    echo ${REWRITTEN_CODE} | csc - -o ${DESTINATION}
 else
-    echo ${REWRITTEN_CODE} | csc -w -
+    echo ${REWRITTEN_CODE} | csc -
 fi

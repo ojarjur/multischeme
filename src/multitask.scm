@@ -33,7 +33,7 @@
         close-output-port close-input-port))
 (define extended-primitives
   '(exit call/cc call-with-current-continuation with-exception-handler
-         map for-each call-with-input-file call-with-output-file
+         map for-each call-with-input-file call-with-output-file reverse
          make-task task? task-live? task-kill))
 (define (escape-symbol symbol)
   (let ((symbol-chars (string->list (symbol->string symbol))))
