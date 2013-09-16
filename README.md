@@ -57,9 +57,16 @@ This implementation assumes the backing Scheme implementation supports
 SRFI 9, which adds support for record types, and SRFI 34, which adds
 support for exception handling.
 
-Those assumptions are baked into this specific implementations, but the
+Those assumptions are baked into this specific implementation, but the
 same multitasking primitives could be implemented without requiring those
 extensions.
+
+Status
+------
+
+This implementation is still a long way from being compliant with any
+version of the Scheme standard, but it is complete enough to bootstrap
+itself, and the new primitive procedures all work.
 
 Implementation
 --------------
