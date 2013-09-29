@@ -16,25 +16,34 @@
 (load "src/desugar.scm")
 (load "src/multitask.scm")
 
-(define (compile-statement statement)
-  (begin (write (transform-statement (rewrite statement)))
+(define (write-with-newline expr)
+  (begin (write expr)
          (newline)))
-(define (read-and-compile input-port)
+(define defined-globals
+  (append extended-primitives
+	  (map (lambda (builtin) (cadr (rewrite builtin))) builtins)))
+(define (compile-statement statement)
+  (write-with-newline (transform-statement statement defined-globals)))
+
+(define (load-statements input-port)
   (let ((expr (read input-port)))
     (if (not (eof-object? expr))
-        (begin (if (and (pair? expr) (eq? (car expr) 'load))
-                   (call-with-input-file (cadr expr) read-and-compile)
-                   (compile-statement expr))
-               (read-and-compile input-port)))))
+        (if (and (pair? expr) (eq? (car expr) 'load))
+            (append (call-with-input-file (cadr expr) load-statements)
+                    (load-statements input-port))
+            (let ((rewritten-statement (rewrite expr)))
+              (begin (if (eq? (car rewritten-statement) 'define)
+                         (set! defined-globals
+                               (cons (cadr rewritten-statement)
+                                     defined-globals)))
+                     (cons rewritten-statement
+                           (load-statements input-port)))))
+        '())))
 (define (compile input-port)
-  (begin (for-each (lambda (statement)
-                     (begin (write statement)
-                            (newline)))
-		   (if overload-primitives?
-		       (append primitives
-			       multitasking-definitions)
-		       multitasking-definitions))
-         (for-each compile-statement builtins)
-         (read-and-compile input-port)
+  (begin (for-each write-with-newline
+                   multitasking-definitions)
+         (for-each compile-statement
+                   (append (map rewrite builtins)
+                           (load-statements input-port)))
          (exit)))
 (compile (current-input-port))

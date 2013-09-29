@@ -12,36 +12,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(define supported-primitives
-  '(eq? equal? cons null? pair? symbol? procedure?
-        string? number? char? boolean? port? eof-object?
-        + - * / quotient remainder < > = member list append not
-        make-string string-length string-append number->string
-        symbol->string string->symbol list->string string->list
-        char->integer integer->char
-        read read-char display write print newline current-input-port
-        vector? make-vector vector-ref vector-set!
-        set-car! set-cdr! car cdr
-        caar cadr cdar cddr
-        caaar caadr cadar caddr
-        cdaar cdadr cddar cdddr
-        caaaar caaadr caadar caaddr
-        cadaar cadadr caddar cadddr
-        cdaaar cdaadr cdadar cdaddr
-        cddaar cddadr cdddar cddddr
-        open-output-file open-input-file
-        close-output-port close-input-port))
 (define extended-primitives
   '(exit call/cc call-with-current-continuation with-exception-handler
-         map for-each call-with-input-file call-with-output-file reverse
          make-task task? task-live? task-kill))
 (define (escape-symbol symbol)
   (let ((symbol-chars (string->list (symbol->string symbol))))
-    (if (or (eq? (car symbol-chars) #\_)
-            (member symbol supported-primitives)
-            (member symbol extended-primitives))
-        (string->symbol (list->string (cons #\_ symbol-chars)))
-        symbol)))
+    (string->symbol (list->string (cons #\_ symbol-chars)))))
 (define (escape-symbols expr)
   (cond ((symbol? expr) (escape-symbol expr))
         ((pair? expr)
@@ -50,58 +26,67 @@
 (define get-next-symbol
   (let ((next-symbol-id 0))
     (lambda ()
-      (let ((symbol-name (string-append "_" (number->string next-symbol-id))))
+      (let ((symbol-name (string-append "s_" (number->string next-symbol-id))))
         (begin (set! next-symbol-id (+ next-symbol-id 1))
                (string->symbol symbol-name))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Setting to indicate whether or not overloading of primitive procedures is ;;
-;; supported. This is required in order to be fully compliant with the       ;;
-;; Scheme language, but most programs will not need it (as they won't        ;;
-;; redefine any primitive procedures), and it adds a significant performance ;;
-;; overhead.                                                                 ;;
-;;                                                                           ;;
-;; In some testing, the multitasking rewrite without support for overloading ;;
-;; primitives adds a 10% performance penalty, over single tasking code, but  ;;
-;; with overloading support, it adds a 50% performance penalty.              ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(define overload-primitives? #t)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CPS transformation procedures ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (make-primitive op)
+  `(lambda (continuation scheduler done-handler . args)
+     (continuation scheduler done-handler (apply ,op args))))
 (define (transform-immediate-tail-call expr)
   (lambda (continuation scheduler done-handler)
     `(,continuation ,scheduler ,done-handler ,expr)))
-(define (transform-atom-tail-call expr)
-  (transform-immediate-tail-call (if (symbol? expr) (escape-symbol expr) expr)))
-(define (transform-lambda-tail-call params body)
+(define (transform-atom-tail-call expr bound-variables)
+  (transform-immediate-tail-call
+   (if (symbol? expr)
+       (if (member expr bound-variables)
+           (escape-symbol expr)
+           (make-primitive expr))
+       expr)))
+(define (bind-variables variables bound-variables)
+  (cond ((pair? variables)
+         (bind-variables (car variables)
+                         (bind-variables (cdr variables) bound-variables)))
+        ((symbol? variables)
+         (cons variables bound-variables))
+        (#t bound-variables)))
+(define (transform-lambda-tail-call params body bound-variables)
   (lambda (continuation scheduler done-handler)
     `(,continuation ,scheduler
                     ,done-handler
                     (lambda ,(append `(,continuation ,scheduler ,done-handler)
                                      (escape-symbols params))
                       (,scheduler (lambda (,scheduler ,done-handler)
-                                    ,((transform-tail-call body)
+                                    ,((transform-tail-call
+                                       body
+                                       (bind-variables params bound-variables))
                                       continuation
                                       scheduler
                                       done-handler)))))))
-(define (transform-if-tail-call test then else)
+(define (transform-if-tail-call test then else bound-variables)
   (lambda (continuation scheduler done-handler)
-    ((transform test)
+    ((transform test bound-variables)
      (lambda (scheduler done-handler test-code)
        `(if ,test-code
-            ,((transform-tail-call then) continuation scheduler done-handler)
-            ,((transform-tail-call else) continuation scheduler done-handler)))
+            ,((transform-tail-call then bound-variables)
+              continuation scheduler done-handler)
+            ,((transform-tail-call else bound-variables)
+              continuation scheduler done-handler)))
      scheduler
      done-handler)))
-(define (transform-application-tail-call op args)
+(define (transform-application-tail-call op args bound-variables)
   (lambda (continuation scheduler done-handler)
-    ((transform-args args)
+    ((transform-args args bound-variables)
      (lambda (scheduler done-handler args-code)
-       (if (or overload-primitives?
-	       (not (member op supported-primitives)))
-	   ((transform op)
+       (if (and (symbol? op) (not (member op bound-variables)))
+	   `(,continuation
+	     ,scheduler
+	     ,done-handler
+	     ,(cons op args-code))
+	   ((transform op bound-variables)
 	    (lambda (scheduler done-handler op-code)
 	      (append `(,op-code
 			,continuation
@@ -109,82 +94,115 @@
 			,done-handler)
 		      args-code))
 	    scheduler
-	    done-handler)
-	   `(,continuation
-	     ,scheduler
-	     ,done-handler
-	     ,(cons op args-code))))
+	    done-handler)))
      scheduler
      done-handler)))
-(define (transform-let-tail-call bindings body)
+(define (transform-bindings bindings bound-variables)
+  (if (pair? bindings)
+      (let ((var (escape-symbols (caar bindings)))
+            (value (cadar bindings)))
+        (lambda (builder scheduler done-handler)
+          ((transform value bound-variables)
+           (lambda (scheduler done-handler value-code)
+             ((transform-bindings (cdr bindings) bound-variables)
+              (lambda (scheduler done-handler bindings-code)
+                (builder scheduler done-handler
+                         (cons `(,var ,value-code) bindings-code)))
+              scheduler
+              done-handler))
+           scheduler
+           done-handler)))
+      (lambda (builder scheduler done-handler)
+        (builder scheduler done-handler '()))))
+(define (transform-let-tail-call bindings body bound-variables)
   (lambda (continuation scheduler done-handler)
-    ((transform-bindings bindings)
+    ((transform-bindings bindings bound-variables)
      (lambda (scheduler done-handler bindings-code)
        `(let ,bindings-code
-          ,((transform-tail-call body)
+          ,((transform-tail-call body
+                                 (bind-variables (map car bindings)
+                                                 bound-variables))
             continuation
             scheduler
             done-handler)))
      scheduler
      done-handler)))
-(define (transform-letrec-tail-call bindings body)
+(define (transform-letrec-tail-call bindings body bound-variables)
   (lambda (continuation scheduler done-handler)
-    ((transform-bindings bindings)
-     (lambda (scheduler done-handler bindings-code)
-       `(letrec ,bindings-code
-          ,((transform-tail-call body)
-            continuation
-            scheduler
-            done-handler)))
-     scheduler
-     done-handler)))
-(define (transform-begin-tail-call statements)
+    (let ((bound-variables (bind-variables (map car bindings) bound-variables)))
+      ((transform-bindings bindings bound-variables)
+       (lambda (scheduler done-handler bindings-code)
+	 `(letrec ,bindings-code
+	    ,((transform-tail-call body bound-variables)
+	      continuation
+	      scheduler
+	      done-handler)))
+       scheduler
+       done-handler))))
+(define (transform-begin-tail-call statements bound-variables)
   (cond ((not (pair? statements))
          (lambda (continuation scheduler done-handler)
            `(,continuation ,scheduler ,done-handler '())))
         ((not (pair? (cdr statements)))
-         (transform-tail-call (car statements)))
+         (transform-tail-call (car statements) bound-variables))
         (#t (lambda (continuation scheduler done-handler)
-              ((transform (car statements))
+              ((transform (car statements) bound-variables)
                (lambda (scheduler done-handler statement-code)
                  `(begin ,statement-code
-                         ,((transform-begin-tail-call (cdr statements))
+                         ,((transform-begin-tail-call (cdr statements)
+                                                      bound-variables)
                            continuation
                            scheduler
                            done-handler)))
                scheduler
                done-handler)))))
-(define (transform-set!-tail-call symbol value)
+(define (transform-set!-tail-call symbol value bound-variables)
   (lambda (continuation scheduler done-handler)
-    ((transform value)
+    ((transform value bound-variables)
      (lambda (scheduler done-handler value-code)
        `(,continuation ,scheduler ,done-handler
                        (set! ,(escape-symbol symbol) ,value-code)))
      scheduler
      done-handler)))
-(define (transform-tail-call expr)
-  (cond ((not (pair? expr)) (transform-atom-tail-call expr))
+(define (transform-tail-call expr bound-variables)
+  (cond ((not (pair? expr)) (transform-atom-tail-call expr bound-variables))
         ((eq? (car expr) 'quote) (transform-immediate-tail-call expr))
         ((eq? (car expr) 'if)
-         (transform-if-tail-call (cadr expr) (caddr expr) (cadddr expr)))
+         (transform-if-tail-call (cadr expr)
+                                 (caddr expr)
+                                 (cadddr expr)
+                                 bound-variables))
         ((eq? (car expr) 'lambda)
-         (transform-lambda-tail-call (cadr expr) (caddr expr)))
+         (transform-lambda-tail-call (cadr expr)
+                                     (caddr expr)
+                                     bound-variables))
         ((eq? (car expr) 'let)
-         (transform-let-tail-call (cadr expr) (caddr expr)))
+         (transform-let-tail-call (cadr expr)
+                                  (caddr expr)
+                                  bound-variables))
         ((eq? (car expr) 'letrec)
-         (transform-letrec-tail-call (cadr expr) (caddr expr)))
+         (transform-letrec-tail-call (cadr expr)
+                                     (caddr expr)
+                                     bound-variables))
         ((eq? (car expr) 'begin)
-         (transform-begin-tail-call (cdr expr)))
+         (transform-begin-tail-call (cdr expr) bound-variables))
         ((eq? (car expr) 'set!)
-         (transform-set!-tail-call (cadr expr) (caddr expr)))
-        (#t (transform-application-tail-call (car expr) (cdr expr)))))
+         (transform-set!-tail-call (cadr expr) (caddr expr) bound-variables))
+        (#t (transform-application-tail-call (car expr)
+                                             (cdr expr)
+                                             bound-variables))))
 
 (define (transform-immediate expr)
   (lambda (builder scheduler done-handler)
     (builder scheduler done-handler expr)))
-(define (transform-atom expr)
-  (transform-immediate (if (symbol? expr) (escape-symbol expr) expr)))
-(define (transform-lambda params body)
+(define (transform-atom expr bound-variables)
+  (transform-immediate
+   (if (symbol? expr)
+       (if (member expr bound-variables)
+           (escape-symbol expr)
+           (make-primitive expr))
+       expr)))
+(define (transform-lambda params body bound-variables)
   (lambda (builder scheduler done-handler)
     (builder scheduler
              done-handler
@@ -194,25 +212,28 @@
                `(lambda ,(append `(,continuation ,scheduler ,done-handler)
                                  (escape-symbols params))
                   (,scheduler (lambda (,scheduler ,done-handler)
-                                ,((transform-tail-call body)
+                                ,((transform-tail-call
+                                   body
+                                   (bind-variables params
+                                                   bound-variables))
                                   continuation
                                   scheduler
                                   done-handler))))))))
-(define (transform-if test then else)
+(define (transform-if test then else bound-variables)
   (lambda (builder scheduler done-handler)
-    ((transform test)
+    ((transform test bound-variables)
      (lambda (scheduler done-handler test-code)
        `(if ,test-code
-            ,((transform then) builder scheduler done-handler)
-            ,((transform else) builder scheduler done-handler)))
+            ,((transform then bound-variables) builder scheduler done-handler)
+            ,((transform else bound-variables) builder scheduler done-handler)))
      scheduler
      done-handler)))
-(define (transform-args args)
+(define (transform-args args bound-variables)
   (if (pair? args)
       (lambda (builder scheduler done-handler)
-        ((transform (car args))
+        ((transform (car args) bound-variables)
          (lambda (scheduler done-handler arg-code)
-           ((transform-args (cdr args))
+           ((transform-args (cdr args) bound-variables)
             (lambda (scheduler done-handler args-code)
               (builder scheduler
                        done-handler
@@ -223,13 +244,13 @@
          done-handler))
       (lambda (builder scheduler done-handler)
         (builder scheduler done-handler '()))))
-(define (transform-application op args)
+(define (transform-application op args bound-variables)
   (lambda (builder scheduler done-handler)
-    ((transform-args args)
+    ((transform-args args bound-variables)
      (lambda (scheduler done-handler args-code)
-       (if (or overload-primitives?
-	       (not (member op supported-primitives)))
-	   ((transform op)
+       (if (and (symbol? op) (not (member op bound-variables)))
+	   (builder scheduler done-handler (cons op args-code))
+	   ((transform op bound-variables)
 	    (lambda (scheduler done-handler op-code)
 	      (let ((scheduler2 (get-next-symbol))
 		    (done-handler2 (get-next-symbol))
@@ -240,58 +261,40 @@
 				   ,done-handler)
 			args-code)))
 	    scheduler
-	    done-handler)
-	   (builder scheduler done-handler (cons op args-code))))
+	    done-handler)))
      scheduler
      done-handler)))
-(define (transform-bindings bindings)
-  (if (pair? bindings)
-      (let ((var (caar bindings))
-            (value (cadar bindings)))
-        (lambda (builder scheduler done-handler)
-          ((transform value)
-           (lambda (scheduler done-handler value-code)
-             ((transform-bindings (cdr bindings))
-              (lambda (scheduler done-handler bindings-code)
-                (builder scheduler done-handler
-                         (cons `(,var ,value-code) bindings-code)))
-              scheduler
-              done-handler))
-           scheduler
-           done-handler)))
-      (lambda (builder scheduler done-handler)
-        (builder scheduler done-handler '()))))
-(define (transform-let bindings body)
+(define (transform-let bindings body bound-variables)
   (lambda (builder scheduler done-handler)
     (let ((continuation (get-next-symbol))
           (value (get-next-symbol)))
       `(let ((,continuation (lambda (,scheduler ,done-handler ,value)
                               ,(builder scheduler done-handler value))))
-         ,((transform-let-tail-call bindings body)
+         ,((transform-let-tail-call bindings body bound-variables)
            continuation
            scheduler
            done-handler)))))
-(define (transform-letrec bindings body)
+(define (transform-letrec bindings body bound-variables)
   (lambda (builder scheduler done-handler)
     (let ((continuation (get-next-symbol))
           (value (get-next-symbol)))
       `(let ((,continuation (lambda (,scheduler ,done-handler ,value)
                               ,(builder scheduler done-handler value))))
-         ,((transform-letrec-tail-call bindings body)
+         ,((transform-letrec-tail-call bindings body bound-variables)
            continuation
            scheduler
            done-handler)))))
-(define (transform-begin statements)
+(define (transform-begin statements bound-variables)
   (cond ((not (pair? statements))
          (lambda (builder scheduler done-handler)
            (builder scheduler done-handler '())))
         ((not (pair? (cdr statements)))
-         (transform (car statements)))
+         (transform (car statements) bound-variables))
         (#t (lambda (builder scheduler done-handler)
-              ((transform (car statements))
+              ((transform (car statements) bound-variables)
                (lambda (scheduler done-handler statement-code)
                  `(begin ,statement-code
-                         ,((transform-begin (cdr statements))
+                         ,((transform-begin (cdr statements) bound-variables)
                            (lambda (scheduler done-handler statements-code)
                              (builder scheduler
                                       done-handler
@@ -300,61 +303,53 @@
                            done-handler)))
                scheduler
                done-handler)))))
-(define (transform-set! symbol value)
+(define (transform-set! symbol value bound-variables)
   (lambda (builder scheduler done-handler)
-    ((transform value)
+    ((transform value bound-variables)
      (lambda (scheduler done-handler value-code)
        (builder scheduler
                 done-handler
                 `(set! ,(escape-symbol symbol) ,value-code)))
      scheduler
      done-handler)))
-(define (transform expr)
-  (cond ((not (pair? expr)) (transform-atom expr))
+(define (transform expr bound-variables)
+  (cond ((not (pair? expr)) (transform-atom expr bound-variables))
         ((eq? (car expr) 'quote) (transform-immediate expr))
         ((eq? (car expr) 'if)
-         (transform-if (cadr expr) (caddr expr) (cadddr expr)))
+         (transform-if (cadr expr) (caddr expr) (cadddr expr) bound-variables))
         ((eq? (car expr) 'lambda)
-         (transform-lambda (cadr expr) (caddr expr)))
+         (transform-lambda (cadr expr) (caddr expr) bound-variables))
         ((eq? (car expr) 'let)
-         (transform-let (cadr expr) (caddr expr)))
+         (transform-let (cadr expr) (caddr expr) bound-variables))
         ((eq? (car expr) 'letrec)
-         (transform-letrec (cadr expr) (caddr expr)))
+         (transform-letrec (cadr expr) (caddr expr) bound-variables))
         ((eq? (car expr) 'begin)
-         (transform-begin (cdr expr)))
+         (transform-begin (cdr expr) bound-variables))
         ((eq? (car expr) 'set!)
-         (transform-set! (cadr expr) (caddr expr)))
-        (#t (transform-application (car expr) (cdr expr)))))
-(define (transform-definition name body)
+         (transform-set! (cadr expr) (caddr expr) bound-variables))
+        (#t (transform-application (car expr) (cdr expr) bound-variables))))
+(define (transform-definition name body defined-globals)
   `(define ,(escape-symbol name)
-     ,((transform (rewrite body))
+     ,((transform body defined-globals)
        (lambda (scheduler done-handler value)
          `(,done-handler ,value))
-       '_definition-scheduler
-       '_definition-done-handler)))
-(define (transform-statement statement)
+       'definition-scheduler
+       'definition-done-handler)))
+(define (transform-statement statement defined-globals)
   (if (and (pair? statement)
            (eq? (car statement) 'define))
       (transform-definition (cadr statement)
-                            (caddr statement))
-      `(_run-loop (_make-task-handle
+                            (caddr statement)
+                            defined-globals)
+      `(run-loop (make-task-handle
                    (lambda (scheduler done-handler)
-                     ,((transform statement)
+                     ,((transform statement defined-globals)
                        (lambda (scheduler done-handler value)
                          `(,done-handler ,value))
                        'scheduler
                        'done-handler))
                    'running
                    '()))))
-
-(define (make-primitive op)
-  `(define ,(escape-symbol op)
-     (lambda (continuation scheduler done-handler . args)
-       (let ((value (_apply ,op args)))
-         (continuation scheduler done-handler value)))))
-(define primitives
-  (append '((define _apply apply))
-          (map make-primitive supported-primitives)))
 
 (define multitasking-definitions
   '((define _exit
@@ -369,11 +364,11 @@
 		  (lambda (dropped scheduler done-handler value)
 		    (continuation scheduler done-handler value)))))
     (define _call/cc _call-with-current-continuation)
-    (define (_wrap-exception-handler handler continuation)
+    (define (wrap-exception-handler handler continuation)
       (lambda (k scheduler done-handler)
         (lambda (ex)
           (k (handler continuation scheduler done-handler ex)))))
-    (define (_wrap-scheduler-with-handler scheduler wrapped-handler)
+    (define (wrap-scheduler-with-handler scheduler wrapped-handler)
       (lambda (callback)
         (scheduler (lambda (scheduler done-handler)
                      (call/cc (lambda (k)
@@ -383,19 +378,19 @@
                                                       done-handler)))))))))
     (define _with-exception-handler
       (lambda (continuation scheduler done-handler exception-handler thunk)
-        (let ((wrapped-handler (_wrap-exception-handler exception-handler
+        (let ((wrapped-handler (wrap-exception-handler exception-handler
                                                         continuation)))
           (call/cc (lambda (k)
                      (with-exception-handler
                       (wrapped-handler k scheduler done-handler)
                       (lambda ()
                         (thunk continuation
-                               (_wrap-scheduler-with-handler scheduler
+                               (wrap-scheduler-with-handler scheduler
                                                              wrapped-handler)
                                done-handler))))))))
 
-    (define (_definition-done-handler value) value)
-    (define (_definition-scheduler callback)
+    (define (definition-done-handler value) value)
+    (define (definition-scheduler callback)
       (call/cc (lambda (k)
                  (with-exception-handler
                   (lambda (x) (k x))
@@ -403,25 +398,25 @@
                     (let ((result (callback (lambda (c) (list 'running c))
                                             (lambda (x) (list 'done x)))))
                       (if (eq? (car result) 'running)
-                          (_definition-scheduler (cadr result))
+                          (definition-scheduler (cadr result))
                           (cadr result))))))))
 
-    (define (_nested-done-handler value) (list 'done value))
-    (define (_countdown-scheduler ticks)
+    (define (nested-done-handler value) (list 'done value))
+    (define (countdown-scheduler ticks)
       (lambda (callback)
         (if (< ticks 100)
-            (callback (_countdown-scheduler (+ ticks 1))
-                      _nested-done-handler)
+            (callback (countdown-scheduler (+ ticks 1))
+                      nested-done-handler)
             (list 'running callback))))
 
-    (define-record-type <_task-handle>
-      (_make-task-handle callback state children)
-      _task-handle?
-      (callback _task-handle-callback _set-task-handle-callback!)
-      (state _task-handle-state _set-task-handle-state!)
-      (children _task-handle-children _set-task-handle-children!))
-    (define (_thunk-task-handle thunk)
-      (_make-task-handle (lambda (scheduler done-handler)
+    (define-record-type <task-handle>
+      (make-task-handle callback state children)
+      task-handle?
+      (callback task-handle-callback set-task-handle-callback!)
+      (state task-handle-state set-task-handle-state!)
+      (children task-handle-children set-task-handle-children!))
+    (define (thunk-task-handle thunk)
+      (make-task-handle (lambda (scheduler done-handler)
                            (thunk (lambda (scheduler done-handler value)
                                     (done-handler value))
                                   scheduler
@@ -429,58 +424,58 @@
                          'running
                          '()))
     (define (_task? continuation scheduler done-handler expr)
-      (continuation scheduler done-handler (_task-handle? expr)))
+      (continuation scheduler done-handler (task-handle? expr)))
     (define (_task-live? continuation scheduler done-handler expr)
       (continuation scheduler done-handler
-                    (and (_task-handle? expr)
-                         (eq? (_task-handle-state expr) 'running))))
-    (define (_kill-task expr final-state)
-      (begin (for-each (lambda (child) (_kill-task child 'killed))
-                       (_task-handle-children expr))
-             (_set-task-handle-state! expr final-state)))
+                    (and (task-handle? expr)
+                         (eq? (task-handle-state expr) 'running))))
+    (define (kill-task expr final-state)
+      (begin (for-each (lambda (child) (kill-task child 'killed))
+                       (task-handle-children expr))
+             (set-task-handle-state! expr final-state)))
     (define (_task-kill continuation scheduler done-handler expr)
-      (continuation scheduler done-handler (_kill-task expr 'killed)))
+      (continuation scheduler done-handler (kill-task expr 'killed)))
 
-    (define _current-task '())
+    (define current-task '())
     (define (_make-task continuation scheduler done-handler thunk)
-      (let ((thunk-task (_thunk-task-handle thunk)))
-        (begin (_set-task-handle-children!
-                _current-task
+      (let ((thunk-task (thunk-task-handle thunk)))
+        (begin (set-task-handle-children!
+                current-task
                 (cons thunk-task
-                      (_task-handle-children _current-task)))
+                      (task-handle-children current-task)))
                (continuation scheduler done-handler thunk-task))))
-    (define (_progress-task task-handle)
-      (begin (set! _current-task task-handle)
+    (define (progress-task task-handle)
+      (begin (set! current-task task-handle)
              (call/cc (lambda (k)
                         (with-exception-handler
                          (lambda (error)
-                           (k (_kill-task task-handle 'failed)))
+                           (k (kill-task task-handle 'failed)))
                          (lambda ()
-                           (let ((result ((_task-handle-callback task-handle)
-                                          (_countdown-scheduler 0)
-                                          _nested-done-handler)))
+                           (let ((result ((task-handle-callback task-handle)
+                                          (countdown-scheduler 0)
+                                          nested-done-handler)))
                              (if (eq? (car result) 'running)
-                                 (_set-task-handle-callback! task-handle
+                                 (set-task-handle-callback! task-handle
                                                              (cadr result))
-                                 (_kill-task task-handle 'done)))))))))
-    (define (_run-tasks tasks)
+                                 (kill-task task-handle 'done)))))))))
+    (define (run-tasks tasks)
       (if (pair? tasks)
-          (let ((task (_run-task (car tasks)))
-                (tasks (_run-tasks (cdr tasks))))
-            (if (eq? (_task-handle-state task) 'running)
+          (let ((task (run-task (car tasks)))
+                (tasks (run-tasks (cdr tasks))))
+            (if (eq? (task-handle-state task) 'running)
                 (cons task tasks)
                 tasks))
           '()))
-    (define (_run-task-children task-handle)
-      (_set-task-handle-children!
+    (define (run-task-children task-handle)
+      (set-task-handle-children!
        task-handle
-       (_run-tasks (_task-handle-children task-handle))))
-    (define (_run-task task-handle)
-      (if (eq? (_task-handle-state task-handle) 'running)
-          (begin (_run-task-children task-handle)
-                 (_progress-task task-handle)
+       (run-tasks (task-handle-children task-handle))))
+    (define (run-task task-handle)
+      (if (eq? (task-handle-state task-handle) 'running)
+          (begin (run-task-children task-handle)
+                 (progress-task task-handle)
                  task-handle)
           task-handle))
-    (define (_run-loop root-task)
-      (if (eq? (_task-handle-state root-task) 'running)
-          (_run-loop (_run-task root-task))))))
+    (define (run-loop root-task)
+      (if (eq? (task-handle-state root-task) 'running)
+          (run-loop (run-task root-task))))))
