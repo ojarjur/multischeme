@@ -13,7 +13,7 @@
 ;; limitations under the License.
 
 (define extended-primitives
-  '(exit call/cc call-with-current-continuation with-exception-handler
+  '(exit apply call/cc call-with-current-continuation with-exception-handler
          make-task task? task-live? task-kill))
 (define (escape-symbol symbol)
   (let ((symbol-chars (string->list (symbol->string symbol))))
@@ -356,6 +356,9 @@
       (lambda (continuation scheduler done-handler . args)
 	(let ((exit-value (if (pair? args) (car args) 0)))
 	  (done-handler exit-value))))
+    (define _apply
+      (lambda (continuation scheduler done-handler op args)
+	(apply op (append (list continuation scheduler done-handler) args))))
     (define _call-with-current-continuation
       (lambda (continuation scheduler done-handler callback)
 	(callback continuation
