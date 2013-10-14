@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Built-in procedures.                                                  ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -22,27 +21,27 @@
   '((define (reverse elements)
       (define (rreverse remaining-elements result)
         (if (pair? remaining-elements)
-            (rreverse (cdr remaining-elements)
-                      (cons (car remaining-elements) result))
-            result))
-      (rreverse elements '()))
+          (rreverse
+            (cdr remaining-elements)
+            (cons (car remaining-elements) result))
+          result))
+      (rreverse elements (quote ())))
     (define (map proc elements)
       (if (pair? elements)
-          (cons (proc (car elements))
-                (map proc (cdr elements)))
-          '()))
+        (cons (proc (car elements))
+              (map proc (cdr elements)))
+        '()))
     (define (for-each proc elements)
       (if (pair? elements)
-          (begin (proc (car elements))
-                 (for-each proc (cdr elements)))
-          '()))
+        (begin
+          (proc (car elements))
+          (for-each proc (cdr elements)))
+        '()))
     (define (call-with-input-file filename callback)
       (let ((port (open-input-file filename)))
         (let ((value (callback port)))
-          (begin (close-input-port port)
-                 value))))
+          (begin (close-input-port port) value))))
     (define (call-with-output-file filename callback)
       (let ((port (open-output-file filename)))
         (let ((value (callback port)))
-          (begin (close-output-port port)
-                 value))))))
+          (begin (close-output-port port) value))))))

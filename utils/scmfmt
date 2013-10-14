@@ -1,0 +1,37 @@
+#!/usr/bin/env guile
+!#
+;; Simple tool that auto formats Scheme code.
+;; This is used to keep the code in this repo consistent.
+(use-modules (ice-9 pretty-print))
+
+;; Helper method for maintaining comments.
+(define (copy-line-comment)
+  (do ((char (read-char) (read-char)))
+      ((or (eof-object? char) (eq? char #\newline))
+       (newline))
+    (write-char char)))
+
+;; The main method.
+;; This reads from and writes to stdin/stdout.
+(let ((context (quote newfile)))
+  (define (set-context new-context)
+    (if (not (or (eq? context new-context)
+                 (member context (quote (newfile comment)))))
+      (newline))
+    (set! context new-context))
+  (define (get-context statement)
+    (if (and (pair? statement)
+             (member (car statement) (quote (load define))))
+      (car statement)
+      'expr))
+  (do ((char (peek-char) (peek-char)))
+      ((eof-object? char))
+    (cond ((char-whitespace? char) (read-char))
+          ((eq? char #\;)
+           (begin
+             (set-context (quote comment))
+             (copy-line-comment)))
+          (#t
+           (let ((statement (read)))
+             (set-context (get-context statement))
+             (pretty-print statement))))))
