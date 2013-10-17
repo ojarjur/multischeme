@@ -1,8 +1,6 @@
-#!/usr/bin/env guile
-!#
+#! /usr/bin/env csi -script
 ;; Simple tool that auto formats Scheme code.
 ;; This is used to keep the code in this repo consistent.
-(use-modules (ice-9 pretty-print))
 
 ;; Helper method for maintaining comments.
 (define (copy-line-comment)
