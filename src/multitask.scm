@@ -13,11 +13,12 @@
 ;; limitations under the License.
 (define extended-primitives
   '(exit apply
-         with-exception-handler
          call/cc
          call-with-current-continuation
          values
          call-with-values
+         dynamic-wind
+         with-exception-handler
          make-task
          task?
          task-live?
@@ -367,14 +368,52 @@
     (define _apply
       (lambda (continuation scheduler done-handler op args)
         (apply op (append (list continuation scheduler done-handler) args))))
+    (define initial-dynamic-context '())
+    (define dynamic-context initial-dynamic-context)
+    (define (extend-dynamic-context context before after)
+      (cons (cons before after) context))
+    (define (switch-to-dynamic-context
+             context
+             continuation
+             scheduler
+             done-handler)
+      (cond ((eq? context dynamic-context)
+             (continuation scheduler done-handler))
+            ((< (length context) (length dynamic-context))
+             ((cdar dynamic-context)
+              (lambda (scheduler done-handler . _)
+                (begin
+                  (set! dynamic-context (cdr dynamic-context))
+                  (switch-to-dynamic-context
+                    context
+                    continuation
+                    scheduler
+                    done-handler)))
+              scheduler
+              done-handler))
+            (#t
+             (switch-to-dynamic-context
+               (cdr context)
+               (lambda (scheduler done-handler . _)
+                 (begin
+                   (set! dynamic-context context)
+                   ((caar context) continuation scheduler done-handler)))
+               scheduler
+               done-handler))))
     (define _call-with-current-continuation
       (lambda (continuation scheduler done-handler callback)
-        (callback
-          continuation
-          scheduler
-          done-handler
-          (lambda (dropped scheduler done-handler value)
-            (continuation scheduler done-handler value)))))
+        (let ((context dynamic-context))
+          (callback
+            continuation
+            scheduler
+            done-handler
+            (lambda (dropped scheduler done-handler value)
+              (switch-to-dynamic-context
+                context
+                (lambda (scheduler done-handler . _)
+                  (continuation scheduler done-handler value))
+                scheduler
+                done-handler))))))
     (define _call/cc _call-with-current-continuation)
     (define _values
       (lambda (continuation scheduler done-handler . args)
@@ -387,6 +426,25 @@
                    (append (list continuation scheduler done-handler) args)))
           scheduler
           done-handler)))
+    (define _dynamic-wind
+      (lambda (continuation scheduler done-handler before thunk after)
+        (let ((prior-context dynamic-context)
+              (new-context
+                (extend-dynamic-context dynamic-context before after)))
+          (switch-to-dynamic-context
+            new-context
+            (lambda (scheduler done-handler . _)
+              (thunk (lambda (scheduler done-handler value)
+                       (switch-to-dynamic-context
+                         prior-context
+                         (lambda (scheduler done-handler . _)
+                           (continuation scheduler done-handler value))
+                         scheduler
+                         done-handler))
+                     scheduler
+                     done-handler))
+            scheduler
+            done-handler))))
     (define (wrap-exception-handler handler continuation)
       (lambda (k scheduler done-handler)
         (lambda (ex) (k (handler continuation scheduler done-handler ex)))))
@@ -432,7 +490,12 @@
       (lambda (callback)
         (if (< ticks 100)
           (callback (countdown-scheduler (+ ticks 1)) nested-done-handler)
-          (list 'running callback))))
+          (let ((saved-context dynamic-context))
+            (list 'running
+                  (lambda (scheduler done-handler)
+                    (begin
+                      (set! dynamic-context saved-context)
+                      (callback scheduler done-handler))))))))
     (define-record-type
       <task-handle>
       (make-task-handle callback state children)
@@ -443,9 +506,11 @@
     (define (thunk-task-handle thunk)
       (make-task-handle
         (lambda (scheduler done-handler)
-          (thunk (lambda (scheduler done-handler value) (done-handler value))
-                 scheduler
-                 done-handler))
+          (begin
+            (set! dynamic-context initial-dynamic-context)
+            (thunk (lambda (scheduler done-handler value) (done-handler value))
+                   scheduler
+                   done-handler)))
         'running
         '()))
     (define (_task? continuation scheduler done-handler expr)
