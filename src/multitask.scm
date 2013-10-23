@@ -19,6 +19,9 @@
          call-with-values
          dynamic-wind
          with-exception-handler
+         promise?
+         make-promise
+         force
          make-task
          task?
          task-live?
@@ -179,6 +182,18 @@
          (set! ,(escape-symbol symbol) ,value-code)))
      scheduler
      done-handler)))
+(define (transform-delay-tail-call expr bound-variables)
+  (lambda (continuation scheduler done-handler)
+    `(,continuation
+      ,scheduler
+      ,done-handler
+      (make-promise-record
+        #f
+        (lambda (,continuation ,scheduler ,done-handler)
+          ,((transform-tail-call expr bound-variables)
+            continuation
+            scheduler
+            done-handler))))))
 (define (transform-tail-call expr bound-variables)
   (cond ((not (pair? expr)) (transform-atom-tail-call expr bound-variables))
         ((eq? (car expr) 'quote) (transform-immediate-tail-call expr))
@@ -198,6 +213,8 @@
          (transform-begin-tail-call (cdr expr) bound-variables))
         ((eq? (car expr) 'set!)
          (transform-set!-tail-call (cadr expr) (caddr expr) bound-variables))
+        ((eq? (car expr) 'delay)
+         (transform-delay-tail-call (cadr expr) bound-variables))
         (#t
          (transform-application-tail-call
            (car expr)
@@ -327,6 +344,19 @@
          `(set! ,(escape-symbol symbol) ,value-code)))
      scheduler
      done-handler)))
+(define (transform-delay expr bound-variables)
+  (lambda (builder scheduler done-handler)
+    (let ((continuation (get-next-symbol)))
+      (builder
+        scheduler
+        done-handler
+        `(make-promise-record
+           #f
+           (lambda (,continuation ,scheduler ,done-handler)
+             ,((transform-tail-call expr bound-variables)
+               continuation
+               scheduler
+               done-handler)))))))
 (define (transform expr bound-variables)
   (cond ((not (pair? expr)) (transform-atom expr bound-variables))
         ((eq? (car expr) 'quote) (transform-immediate expr))
@@ -341,6 +371,7 @@
         ((eq? (car expr) 'begin) (transform-begin (cdr expr) bound-variables))
         ((eq? (car expr) 'set!)
          (transform-set! (cadr expr) (caddr expr) bound-variables))
+        ((eq? (car expr) 'delay) (transform-delay (cadr expr) bound-variables))
         (#t (transform-application (car expr) (cdr expr) bound-variables))))
 (define (transform-definition name body defined-globals)
   `(define ,(escape-symbol name)
@@ -471,6 +502,32 @@
                            scheduler
                            wrapped-handler)
                          done-handler))))))))
+    (define-record-type
+      <promise>
+      (make-promise-record evaluated value)
+      promise-record?
+      (evaluated promise-record-evaluated set-promise-record-evaluated!)
+      (value promise-record-value set-promise-record-value!))
+    (define _promise?
+      (lambda (continuation scheduler done-handler expr)
+        (continuation scheduler done-handler (promise-record? expr))))
+    (define _make-promise
+      (lambda (continuation scheduler done-handler expr)
+        (continuation scheduler done-handler (make-promise-record #t expr))))
+    (define _force
+      (lambda (continuation scheduler done-handler expr)
+        (if (promise-record? expr)
+          (if (promise-record-evaluated expr)
+            (continuation scheduler done-handler (promise-record-value expr))
+            ((promise-record-value expr)
+             (lambda (scheduler done-handler value)
+               (begin
+                 (set-promise-record-value! expr value)
+                 (set-promise-record-evaluated! expr #t)
+                 (continuation scheduler done-handler value)))
+             scheduler
+             done-handler))
+          (continuation scheduler done-handler expr))))
     (define (definition-done-handler value) value)
     (define (definition-scheduler callback)
       (call/cc
