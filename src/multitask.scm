@@ -157,7 +157,7 @@
 (define (transform-begin-tail-call statements bound-variables)
   (cond ((not (pair? statements))
          (lambda (continuation scheduler done-handler)
-           `(,continuation ,scheduler ,done-handler '())))
+           `(,continuation ,scheduler ,done-handler (begin))))
         ((not (pair? (cdr statements)))
          (transform-tail-call (car statements) bound-variables))
         (#t
@@ -318,7 +318,7 @@
 (define (transform-begin statements bound-variables)
   (cond ((not (pair? statements))
          (lambda (builder scheduler done-handler)
-           (builder scheduler done-handler '())))
+           (builder scheduler done-handler '(begin))))
         ((not (pair? (cdr statements)))
          (transform (car statements) bound-variables))
         (#t
