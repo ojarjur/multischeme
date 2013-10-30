@@ -51,6 +51,30 @@
          `(if ,(rewrite (caar cases))
             ,(rewrite (cadar cases))
             ,(rewrite-cond (cdr cases))))))
+(define (rewrite-case key cases)
+  (define (rewrite-cases cases next-id cont)
+    (if (pair? cases)
+      (rewrite-cases
+        (cdr cases)
+        (+ next-id 1)
+        (lambda (bindings code)
+          (let ((thunk-id
+                  (string->symbol
+                    (string-append "t_" (number->string next-id)))))
+            (if (eq? (caar cases) 'else)
+              (cont `((,thunk-id
+                       (lambda () (begin unquote (rewrite (cdar cases))))))
+                    `(,thunk-id))
+              (cont (cons `(,thunk-id
+                            (lambda () (begin unquote (rewrite (cdar cases)))))
+                          bindings)
+                    `(if (memv key ',(caar cases)) (,thunk-id) ,code))))))
+      (cont '() '(begin))))
+  (rewrite-cases
+    cases
+    0
+    (lambda (bindings code)
+      `(let ,(cons `(key ,(rewrite key)) bindings) ,code))))
 (define (rewrite-and tests)
   (if (pair? tests)
     `(let ((first ,(rewrite (car tests)))
@@ -123,6 +147,7 @@
         ((eq? (car expr) 'let*) (rewrite-let* (cadr expr) (caddr expr)))
         ((eq? (car expr) 'letrec*) (rewrite-letrec* (cadr expr) (caddr expr)))
         ((eq? (car expr) 'cond) (rewrite-cond (cdr expr)))
+        ((eq? (car expr) 'case) (rewrite-case (cadr expr) (cddr expr)))
         ((eq? (car expr) 'and) (rewrite-and (cdr expr)))
         ((eq? (car expr) 'or) (rewrite-or (cdr expr)))
         ((eq? (car expr) 'define)
