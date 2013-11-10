@@ -63,10 +63,10 @@
                     (string-append "t_" (number->string next-id)))))
             (if (eq? (caar cases) 'else)
               (cont `((,thunk-id
-                       (lambda () (begin unquote (rewrite (cdar cases))))))
+                       (lambda () ,(cons 'begin (rewrite (cdar cases))))))
                     `(,thunk-id))
               (cont (cons `(,thunk-id
-                            (lambda () (begin unquote (rewrite (cdar cases)))))
+                            (lambda () ,(cons 'begin (rewrite (cdar cases)))))
                           bindings)
                     `(if (memv key ',(caar cases)) (,thunk-id) ,code))))))
       (cont '() '(begin))))
@@ -75,6 +75,39 @@
     0
     (lambda (bindings code)
       `(let ,(cons `(key ,(rewrite key)) bindings) ,code))))
+(define (free-symbol . args)
+  (letrec ((symbol-in?
+             (lambda (symbol expr)
+               (if (pair? expr)
+                 (or (symbol-in? symbol (car expr))
+                     (symbol-in? symbol (cdr expr)))
+                 (eq? symbol expr))))
+           (find-symbol
+             (lambda (next-id)
+               (let ((symbol-name
+                       (string-append "s_" (number->string next-id))))
+                 (let ((symbol (string->symbol symbol-name)))
+                   (if (symbol-in? symbol args)
+                     (find-symbol (+ next-id 1))
+                     symbol))))))
+    (find-symbol 0)))
+(define (rewrite-do vars test commands)
+  (let ((params (map car vars))
+        (first-args (map (lambda (var) (rewrite (cadr var))) vars))
+        (update-args
+          (map (lambda (var)
+                 (if (pair? (cddr var)) (rewrite (caddr var)) (car var)))
+               vars))
+        (loop-var (free-symbol vars test commands)))
+    `(letrec ((,loop-var
+               (lambda ,params
+                 (if ,(rewrite (car test))
+                   ,(cons 'begin (map rewrite (cdr test)))
+                   ,(cons 'begin
+                          (append
+                            (map rewrite commands)
+                            `(,(cons loop-var update-args))))))))
+       ,(cons loop-var first-args))))
 (define (rewrite-and tests)
   (if (pair? tests)
     `(let ((first ,(rewrite (car tests)))
@@ -148,6 +181,8 @@
         ((eq? (car expr) 'letrec*) (rewrite-letrec* (cadr expr) (caddr expr)))
         ((eq? (car expr) 'cond) (rewrite-cond (cdr expr)))
         ((eq? (car expr) 'case) (rewrite-case (cadr expr) (cddr expr)))
+        ((eq? (car expr) 'do)
+         (rewrite-do (cadr expr) (caddr expr) (cdddr expr)))
         ((eq? (car expr) 'and) (rewrite-and (cdr expr)))
         ((eq? (car expr) 'or) (rewrite-or (cdr expr)))
         ((eq? (car expr) 'define)
