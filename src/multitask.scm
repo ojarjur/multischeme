@@ -25,6 +25,8 @@
          make-task
          task?
          task-live?
+         task-killed?
+         task-done?
          task-kill))
 (define (escape-symbol symbol)
   (let ((symbol-chars (string->list (symbol->string symbol))))
@@ -577,6 +579,16 @@
         scheduler
         done-handler
         (and (task-handle? expr) (eq? (task-handle-state expr) 'running))))
+    (define (_task-killed? continuation scheduler done-handler expr)
+      (continuation
+        scheduler
+        done-handler
+        (and (task-handle? expr) (eq? (task-handle-state expr) 'killed))))
+    (define (_task-done? continuation scheduler done-handler expr)
+      (continuation
+        scheduler
+        done-handler
+        (and (task-handle? expr) (eq? (task-handle-state expr) 'done))))
     (define (kill-task expr final-state)
       (begin
         (for-each

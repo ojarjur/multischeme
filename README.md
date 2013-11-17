@@ -22,6 +22,10 @@ The following new primitive methods are provided:
       otherwise #f
     * (task-live? <expr>) - Returns #t if the passed expression is a
       live (running) task, otherwise #f
+    * (task-killed? <expr>) - Returns #t if the passed expression is a
+      task that has been killed, otherwise #f
+    * (task-done? <expr>) - Returns #t if the passed expression is a
+      task that exited normally, otherwise #f
     * (task-kill <task>) - Kills the specified task immediately. Any
       child tasks are also killed. It is an error to call this with
       a non-task value. It is a no-op to call this with an already
