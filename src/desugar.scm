@@ -4,7 +4,7 @@
 ;; you may not use this file except in compliance with the License.
 ;; You may obtain a copy of the License at
 ;;
-;;     http://www.apache.org/licenses/LICENSE-2.0
+;; http://www.apache.org/licenses/LICENSE-2.0
 ;;
 ;; Unless required by applicable law or agreed to in writing, software
 ;; distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,8 +12,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Helper procedures for simplifying statements before cps-transforming them ;;
+;; Helper procedures for simplifying statements before cps-transforming them
+;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (rewrite-named-let name bindings rewritten-body)
+  (cons `(letrec ((,name (lambda ,(map car bindings) ,rewritten-body))) ,name)
+        (map (lambda (binding) (rewrite (cadr binding))) bindings)))
 (define (rewrite-let bindings rewritten-body)
   `(let (unquote
          (map (lambda (binding) `(,(car binding) ,(rewrite (cadr binding))))
@@ -176,7 +180,12 @@
         ((eq? (car expr) 'quote) expr)
         ((eq? (car expr) 'quasiquote) (rewrite-quasiquote (cadr expr) 1))
         ((eq? (car expr) 'let)
-         (rewrite-let (cadr expr) (rewrite-lambda-body (cddr expr))))
+         (if (symbol? (cadr expr))
+           (rewrite-named-let
+             (cadr expr)
+             (caddr expr)
+             (rewrite-lambda-body (cdddr expr)))
+           (rewrite-let (cadr expr) (rewrite-lambda-body (cddr expr)))))
         ((eq? (car expr) 'letrec)
          (rewrite-letrec (cadr expr) (rewrite-lambda-body (cddr expr))))
         ((eq? (car expr) 'let*)
