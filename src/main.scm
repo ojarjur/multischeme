@@ -31,7 +31,8 @@
           (load-statements input-port))
         (let ((rewritten-statement (rewrite expr)))
           (begin
-            (if (eq? (car rewritten-statement) 'define)
+            (if (and (pair? rewritten-statement)
+                     (eq? (car rewritten-statement) 'define))
               (set! defined-globals
                 (cons (cadr rewritten-statement) defined-globals)))
             (cons rewritten-statement (load-statements input-port)))))
