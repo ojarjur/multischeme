@@ -42,4 +42,8 @@
     (define (call-with-output-file filename callback)
       (let ((port (open-output-file filename)))
         (let ((value (callback port)))
-          (begin (close-output-port port) value))))))
+          (begin (close-output-port port) value))))
+    (define (newline . args)
+      (write-char
+        #\newline
+        (if (pair? args) (car args) (current-output-port))))))

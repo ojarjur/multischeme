@@ -22,6 +22,17 @@
          promise?
          make-promise
          force
+         read-char
+         peek-char
+         char-ready?
+         read
+         write-char
+         write
+         display
+         with-input-from-file
+         with-output-to-file
+         current-output-port
+         current-input-port
          make-task
          task?
          task-live?
@@ -401,6 +412,82 @@
     (define _apply
       (lambda (continuation scheduler done-handler op args)
         (apply op (append (list continuation scheduler done-handler) args))))
+    (define input-port (current-input-port))
+    (define output-port (current-output-port))
+    (define _read-char
+      (lambda (continuation scheduler done-handler . args)
+        (continuation
+          scheduler
+          done-handler
+          (read-char (if (pair? args) (car args) input-port)))))
+    (define _peek-char
+      (lambda (continuation scheduler done-handler . args)
+        (continuation
+          scheduler
+          done-handler
+          (peek-char (if (pair? args) (car args) input-port)))))
+    (define _char-ready?
+      (lambda (continuation scheduler done-handler . args)
+        (continuation
+          scheduler
+          done-handler
+          (char-ready? (if (pair? args) (car args) input-port)))))
+    (define _read
+      (lambda (continuation scheduler done-handler . args)
+        (continuation
+          scheduler
+          done-handler
+          (read (if (pair? args) (car args) input-port)))))
+    (define _write-char
+      (lambda (continuation scheduler done-handler char . args)
+        (continuation
+          scheduler
+          done-handler
+          (write-char char (if (pair? args) (car args) output-port)))))
+    (define _write
+      (lambda (continuation scheduler done-handler char . args)
+        (continuation
+          scheduler
+          done-handler
+          (write char (if (pair? args) (car args) output-port)))))
+    (define _display
+      (lambda (continuation scheduler done-handler char . args)
+        (continuation
+          scheduler
+          done-handler
+          (display char (if (pair? args) (car args) output-port)))))
+    (define _current-input-port
+      (lambda (continuation scheduler done-handler)
+        (continuation scheduler done-handler input-port)))
+    (define _current-output-port
+      (lambda (continuation scheduler done-handler)
+        (continuation scheduler done-handler output-port)))
+    (define _with-input-from-file
+      (lambda (continuation scheduler done-handler filename thunk)
+        (let ((initial-input-port input-port)
+              (port (open-input-file filename)))
+          (begin
+            (set! input-port port)
+            (thunk (lambda (scheduler done-handler value)
+                     (begin
+                       (close-input-port port)
+                       (set! input-port initial-input-port)
+                       (continuation scheduler done-handler value)))
+                   scheduler
+                   done-handler)))))
+    (define _with-output-to-file
+      (lambda (continuation scheduler done-handler filename thunk)
+        (let ((initial-output-port output-port)
+              (port (open-output-file filename)))
+          (begin
+            (set! output-port port)
+            (thunk (lambda (scheduler done-handler value)
+                     (begin
+                       (close-output-port port)
+                       (set! output-port initial-output-port)
+                       (continuation scheduler done-handler value)))
+                   scheduler
+                   done-handler)))))
     (define initial-dynamic-context '())
     (define dynamic-context initial-dynamic-context)
     (define (extend-dynamic-context context before after)
@@ -549,11 +636,15 @@
       (lambda (callback)
         (if (< ticks 100)
           (callback (countdown-scheduler (+ ticks 1)) nested-done-handler)
-          (let ((saved-context dynamic-context))
+          (let ((saved-context dynamic-context)
+                (saved-output-port output-port)
+                (saved-input-port input-port))
             (list 'running
                   (lambda (scheduler done-handler)
                     (begin
                       (set! dynamic-context saved-context)
+                      (set! output-port saved-output-port)
+                      (set! input-port saved-input-port)
                       (callback scheduler done-handler))))))))
     (define-record-type
       <task-handle>
