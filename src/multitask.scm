@@ -565,31 +565,45 @@
                      done-handler))
             scheduler
             done-handler))))
-    (define (wrap-exception-handler handler continuation)
-      (lambda (k scheduler done-handler)
-        (lambda (ex) (k (handler continuation scheduler done-handler ex)))))
-    (define (wrap-scheduler-with-handler scheduler wrapped-handler)
-      (lambda (callback)
-        (scheduler
-          (lambda (scheduler done-handler)
-            (call/cc
-              (lambda (k)
-                (with-exception-handler
-                  (wrapped-handler k scheduler done-handler)
-                  (lambda () (callback scheduler done-handler)))))))))
+    (define (current-exception-handler scheduler done-handler ex) (raise ex))
     (define _with-exception-handler
       (lambda (continuation scheduler done-handler exception-handler thunk)
-        (let ((wrapped-handler
-                (wrap-exception-handler exception-handler continuation)))
-          (call/cc
-            (lambda (k)
-              (with-exception-handler
-                (wrapped-handler k scheduler done-handler)
-                (lambda ()
-                  (thunk continuation
-                         (wrap-scheduler-with-handler
-                           scheduler
-                           wrapped-handler)
+        (let* ((previous current-exception-handler)
+               (keep-wrapping #t)
+               (unwind
+                 (lambda ()
+                   (begin
+                     (set! current-exception-handler previous)
+                     (set! keep-wrapping #f)))))
+          (define (current scheduler done-handler ex)
+            (begin
+              (unwind)
+              (exception-handler
+                (lambda args (current scheduler done-handler ex))
+                scheduler
+                done-handler
+                ex)))
+          (define (wrap-callback callback)
+            (lambda (scheduler done-handler)
+              (if keep-wrapping
+                (call/cc
+                  (lambda (k)
+                    (with-exception-handler
+                      (lambda (ex) (k (current scheduler done-handler ex)))
+                      (lambda ()
+                        (callback
+                          (lambda (callback)
+                            (scheduler (wrap-callback callback)))
+                          done-handler)))))
+                (callback scheduler done-handler))))
+          (begin
+            (set! current-exception-handler current)
+            (scheduler
+              (wrap-callback
+                (lambda (scheduler done-handler)
+                  (thunk (lambda args
+                           (begin (unwind) (apply continuation args)))
+                         scheduler
                          done-handler))))))))
     (define-record-type
       <promise>
@@ -638,13 +652,15 @@
           (callback (countdown-scheduler (+ ticks 1)) nested-done-handler)
           (let ((saved-context dynamic-context)
                 (saved-output-port output-port)
-                (saved-input-port input-port))
+                (saved-input-port input-port)
+                (saved-exception-handler current-exception-handler))
             (list 'running
                   (lambda (scheduler done-handler)
                     (begin
                       (set! dynamic-context saved-context)
                       (set! output-port saved-output-port)
                       (set! input-port saved-input-port)
+                      (set! current-exception-handler saved-exception-handler)
                       (callback scheduler done-handler))))))))
     (define-record-type
       <task-handle>
