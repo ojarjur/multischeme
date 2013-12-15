@@ -8,14 +8,35 @@ function run_test() {
                              (lambda ()
                                (display (call/cc (lambda (k2)
                                                    (with-exception-handler
-                                                     (lambda (x) (k2 \"Inner\"))
+                                                     (lambda (x) (k2 \"Inner1\"))
                                                      (lambda () (cdr 1))))))
+                               (newline)
+                               (display (call/cc (lambda (k3)
+                                                   (with-exception-handler
+                                                     (lambda (x) (k3 \"Inner2\"))
+                                                     (lambda () (raise 1))))))
                                (newline)
                                (cdr 1))))))
        (newline))
+(let ((task1 (make-task
+               (lambda ()
+                 (call/cc
+                   (lambda (k)
+                     (with-exception-handler
+                       (lambda (ex) (begin (display \"Task1\")
+                                           (newline)
+                                           (k 1)))
+                       (lambda () (cdr 1))))))))
+      (task2 (make-task
+               (lambda () (raise \"Task2\")))))
+  (define (wait)
+    (if (or (task-live? task1) (task-live? task2))
+        (wait)))
+  (wait))
+(raise 0)
 " | ./multischemec.sh - -o bin/test
     OUTPUT=`bin/test`
-    EXPECTED=$'Inner\nOutter'
+    EXPECTED=$'Inner1\nInner2\nOutter\nTask1'
     if [ "$OUTPUT" = "$EXPECTED" ]; then
         echo $'\tPassed'
         return 0
