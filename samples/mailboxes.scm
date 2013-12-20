@@ -18,28 +18,44 @@
         (insert-position (caddr mailbox))
         (size (cadddr mailbox)))
     (= (- insert-position size) read-start)))
-(define (send-message mailbox message)
+(define (mailbox-send mailbox message)
   (let ((store (car mailbox))
         (read-start (cadr mailbox))
         (insert-position (caddr mailbox))
         (size (cadddr mailbox)))
     (if (= (- insert-position size) read-start)
         ;; The fixed size buffer is full. Wait and check again.
-        (send-message mailbox message)
+        (mailbox-send mailbox message)
         ;; Send a message, the entire following block is atomic,
         ;; so we don't have to worry about read-modify-write conflicts.
         (begin (set-car! (cddr mailbox) (+ insert-position 1))
                (vector-set! store (remainder insert-position size) message)
                mailbox))))
-(define (receive-message mailbox)
+(define (mailbox-poll mailbox message-handler empty-thunk)
   (let ((store (car mailbox))
         (read-start (cadr mailbox))
         (insert-position (caddr mailbox))
         (size (cadddr mailbox)))
     (if (= read-start insert-position)
-        ;; The fixed size buffer is empty. Wait and check again.
-        (receive-message mailbox)
-        ;; Send a message, the entire following block is atomic,
-        ;; so we don't have to worry about read-modify-write conflicts.
+        ;; The fixed size buffer is empty.
+        (empty-thunk)
+        ;; Send a message to the handler. The entire following block (until
+        ;; the final tail-call) is atomic, so we don't have to worry about
+        ;; read-modify-write conflicts.
         (begin (set-car! (cdr mailbox) (+ read-start 1))
-               (vector-ref store (remainder read-start size))))))
+               (message-handler (vector-ref store
+                                            (remainder read-start size)))))))
+(define (mailbox-receive mailbox)
+  (mailbox-poll mailbox
+                (lambda (message) message)
+                (lambda () (mailbox-receive mailbox))))
+(define (mailbox-select mailbox . mailboxes)
+  (define (recursive-select m ms)
+    (mailbox-poll m
+                  (lambda (message) message)
+                  (lambda ()
+                    (if (null? ms)
+                        (recursive-select mailbox mailboxes)
+                        (recursive-select (car mailboxes)
+                                          (cdr mailboxes))))))
+  (recursive-select mailbox mailboxes))

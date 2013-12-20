@@ -5,16 +5,16 @@ function run_test() {
 (load "samples/with-subscriber.scm")
 
 (define (display-messages mailbox)
-  (begin (display (receive-message mailbox))
+  (begin (display (mailbox-receive mailbox))
          (newline)
          (display-messages mailbox)))
-(define (send-messages mailbox)
+(define (mailbox-sends mailbox)
   (define (send-sequence start end)
      (if (< start end)
-         (begin (send-message mailbox start)
+         (begin (mailbox-send mailbox start)
                 (send-sequence (+ start 1) end))))
   (send-sequence 0 10))
-(with-subscriber display-messages send-messages)')
+(with-subscriber display-messages mailbox-sends)')
     OUTPUT=`bin/test`
     EXPECTED="0
 1
