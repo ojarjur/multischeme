@@ -579,7 +579,7 @@
             (begin
               (unwind)
               (exception-handler
-                (lambda args (current scheduler done-handler ex))
+                (lambda args (previous scheduler done-handler ex))
                 scheduler
                 done-handler
                 ex)))
@@ -589,7 +589,7 @@
                 (call/cc
                   (lambda (k)
                     (with-exception-handler
-                      (lambda (ex) (k (current scheduler done-handler ex)))
+                      (lambda (ex) (k (current-exception-handler scheduler done-handler ex)))
                       (lambda ()
                         (callback
                           (lambda (callback)

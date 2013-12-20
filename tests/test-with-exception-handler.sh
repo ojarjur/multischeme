@@ -18,6 +18,14 @@ function run_test() {
                                (newline)
                                (cdr 1))))))
        (newline))
+(begin (display (call/cc (lambda (k)
+                           (with-exception-handler
+                             (lambda (ex) (k \"... and unhandled\"))
+                             (lambda ()
+                               (with-exception-handler
+                                 (lambda (ex) (display \"Caught\"))
+                                 (lambda () (raise \"Error\"))))))))
+       (newline))
 (let ((task1 (make-task
                (lambda ()
                  (call/cc
@@ -36,7 +44,7 @@ function run_test() {
 (raise 0)
 " | ./multischemec.sh - -o bin/test
     OUTPUT=`bin/test`
-    EXPECTED=$'Inner1\nInner2\nOutter\nTask1'
+    EXPECTED=$'Inner1\nInner2\nOutter\nCaught... and unhandled\nTask1'
     if [ "$OUTPUT" = "$EXPECTED" ]; then
         echo $'\tPassed'
         return 0
