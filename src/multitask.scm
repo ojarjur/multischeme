@@ -464,30 +464,44 @@
         (continuation scheduler done-handler output-port)))
     (define _with-input-from-file
       (lambda (continuation scheduler done-handler filename thunk)
-        (let ((initial-input-port input-port)
-              (port (open-input-file filename)))
-          (begin
-            (set! input-port port)
-            (thunk (lambda (scheduler done-handler value)
-                     (begin
-                       (close-input-port port)
-                       (set! input-port initial-input-port)
-                       (continuation scheduler done-handler value)))
-                   scheduler
-                   done-handler)))))
+        (let ((prior-input-port input-port)
+              (before
+                (lambda (continuation scheduler done-handler)
+                  (begin
+                    (set! input-port (open-input-file filename))
+                    (continuation scheduler done-handler))))
+              (after (lambda (continuation scheduler done-handler)
+                       (begin
+                         (close-input-port input-port)
+                         (set! input-port prior-input-port)
+                         (continuation scheduler done-handler)))))
+          (_dynamic-wind
+            continuation
+            scheduler
+            done-handler
+            before
+            thunk
+            after))))
     (define _with-output-to-file
       (lambda (continuation scheduler done-handler filename thunk)
-        (let ((initial-output-port output-port)
-              (port (open-output-file filename)))
-          (begin
-            (set! output-port port)
-            (thunk (lambda (scheduler done-handler value)
-                     (begin
-                       (close-output-port port)
-                       (set! output-port initial-output-port)
-                       (continuation scheduler done-handler value)))
-                   scheduler
-                   done-handler)))))
+        (let ((prior-output-port output-port)
+              (before
+                (lambda (continuation scheduler done-handler)
+                  (begin
+                    (set! output-port (open-output-file filename))
+                    (continuation scheduler done-handler))))
+              (after (lambda (continuation scheduler done-handler)
+                       (begin
+                         (close-output-port output-port)
+                         (set! output-port prior-output-port)
+                         (continuation scheduler done-handler)))))
+          (_dynamic-wind
+            continuation
+            scheduler
+            done-handler
+            before
+            thunk
+            after))))
     (define initial-dynamic-context '())
     (define dynamic-context initial-dynamic-context)
     (define (extend-dynamic-context context before after)
@@ -589,7 +603,11 @@
                 (call/cc
                   (lambda (k)
                     (with-exception-handler
-                      (lambda (ex) (k (current-exception-handler scheduler done-handler ex)))
+                      (lambda (ex)
+                        (k (current-exception-handler
+                             scheduler
+                             done-handler
+                             ex)))
                       (lambda ()
                         (callback
                           (lambda (callback)
