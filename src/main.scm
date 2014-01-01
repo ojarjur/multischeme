@@ -20,8 +20,11 @@
   (append
     extended-primitives
     (map (lambda (builtin) (cadr (rewrite builtin))) builtins)))
-(define (compile-statement statement)
-  (write-with-newline (transform-statement statement defined-globals)))
+(define (compile-statement get-next-symbol)
+  (let ((transform (transform-statement get-next-symbol)))
+    (lambda (statement)
+      (write-with-newline
+        (transform (rewrite statement) defined-globals get-next-symbol)))))
 (define (load-statements input-port)
   (let ((expr (read input-port)))
     (if (not (eof-object? expr))
@@ -29,20 +32,50 @@
         (append
           (call-with-input-file (cadr expr) load-statements)
           (load-statements input-port))
-        (let ((rewritten-statement (rewrite expr)))
-          (begin
-            (if (and (pair? rewritten-statement)
-                     (eq? (car rewritten-statement) 'define))
-              (set! defined-globals
-                (cons (cadr rewritten-statement) defined-globals)))
-            (cons rewritten-statement (load-statements input-port)))))
+        (begin
+          (if (and (pair? expr) (eq? (car expr) 'define))
+            (set! defined-globals
+              (cons (if (pair? (cadr expr)) (caadr expr) (cadr expr))
+                    defined-globals)))
+          (cons expr (load-statements input-port))))
       '())))
+(define (symbols-starting-with prefix expr)
+  (define prefix-length (string-length prefix))
+  (define (matches? symbol)
+    (let* ((symbol-string (symbol->string symbol)))
+      (string=?
+        (substring
+          symbol-string
+          0
+          (min (string-length symbol-string) prefix-length))
+        prefix)))
+  (define (recursive-find expr result)
+    (cond ((and (symbol? expr) (matches? expr) (not (member expr result)))
+           (cons expr result))
+          ((pair? expr)
+           (recursive-find (car expr) (recursive-find (cdr expr) result)))
+          (#t result)))
+  (recursive-find expr '()))
+(define (make-get-next-symbol prefix excluded-symbols)
+  (let ((next-id 0))
+    (define (get-next-symbol)
+      (let ((symbol
+              (string->symbol
+                (string-append prefix (number->string next-id)))))
+        (begin
+          (set! next-id (+ next-id 1))
+          (if (member symbol excluded-symbols) (get-next-symbol) symbol))))
+    get-next-symbol))
 (define (compile input-port)
-  (begin
-    (for-each write-with-newline multitasking-definitions)
-    (for-each
-      compile-statement
-      (append (map rewrite builtins) (load-statements input-port)))
-    (exit)))
+  (let* ((statements (append builtins (load-statements input-port)))
+         (symbol-prefix "_s_")
+         (conflicting-symbols (symbols-starting-with symbol-prefix statements))
+         (get-next-symbol
+           (make-get-next-symbol symbol-prefix conflicting-symbols))
+         (compiler (compile-statement get-next-symbol)))
+    (begin
+      (for-each write-with-newline multitasking-definitions)
+      (for-each compiler statements)
+      (exit))))
 
 (compile (current-input-port))
