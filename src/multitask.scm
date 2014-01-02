@@ -447,17 +447,19 @@
          'definition-scheduler
          'definition-done-handler)))
   (lambda (statement defined-globals gensym)
-    (if (and (pair? statement) (eq? (car statement) 'define))
-      (transform-definition (cadr statement) (caddr statement) defined-globals)
-      `(run-loop
-         (make-task-handle
-           (lambda (scheduler done-handler)
-             ,((transform statement defined-globals)
-               (lambda (scheduler done-handler value) `(,done-handler ,value))
-               'scheduler
-               'done-handler))
-           'running
-           '())))))
+    (cond ((and (pair? statement) (eq? (car statement) 'define))
+           (transform-definition (cadr statement) (caddr statement) defined-globals))
+          ((and (pair? statement) (eq? (car statement) 'define-record-type))
+           (escape-symbols statement))
+          (#t `(run-loop
+                (make-task-handle
+                 (lambda (scheduler done-handler)
+                   ,((transform statement defined-globals)
+                     (lambda (scheduler done-handler value) `(,done-handler ,value))
+                     'scheduler
+                     'done-handler))
+                 'running
+                 '()))))))
 (define multitasking-definitions
   '((define _exit
       (lambda (continuation scheduler done-handler . args)
