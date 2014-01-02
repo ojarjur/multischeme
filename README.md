@@ -68,9 +68,10 @@ extensions.
 Status
 ------
 
-This implementation is still a long way from being compliant with any
-version of the Scheme standard, but it is complete enough to bootstrap
-itself, and the new primitive procedures all work.
+This implementation supports all of R5RS except for macros and eval (and
+the interaction environment procedures related to eval). It also supports
+the extensions from SRFI 9 and SRFI 34. This code is also complete enough
+to bootstrap itself, and the new primitive procedures all work.
 
 Implementation
 --------------
