@@ -11,3 +11,4 @@ for FILE in `ls tests/test*.sh`; do
   fi
 done
 echo "PASSED: ${PASSED}, FAILED: ${FAILED}"
+exit $([ "${FAILED}" == "0" ])
