@@ -68,6 +68,8 @@ extensions.
 Status
 ------
 
+[![Build Status](https://travis-ci.org/ojarjur/multischeme.svg?branch=master)](https://travis-ci.org/ojarjur/multischeme)
+
 This implementation supports all of R5RS except for macros and eval (and
 the interaction environment procedures related to eval). It also supports
 the extensions from SRFI 9 and SRFI 34. This code is also complete enough
