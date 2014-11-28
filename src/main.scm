@@ -16,15 +16,22 @@
 (load "src/multitask.scm")
 
 (define (write-with-newline expr) (begin (write expr) (newline)))
+(define rewrite-rules (make-rewrite-rules '()))
 (define defined-globals
   (append
     extended-primitives
-    (map (lambda (builtin) (cadr (rewrite builtin))) builtins)))
+    (map (lambda (builtin) (car (car (cdr builtin)))) builtins)))
 (define (compile-statement get-next-symbol)
   (let ((transform (transform-statement get-next-symbol)))
     (lambda (statement)
-      (write-with-newline
-        (transform (rewrite statement) defined-globals get-next-symbol)))))
+      (rewrite-rules
+        statement
+        (lambda (rewritten-statement)
+          (write-with-newline
+            (transform
+              rewritten-statement
+              defined-globals
+              get-next-symbol)))))))
 (define (load-statements input-port)
   (let ((expr (read input-port)))
     (if (not (eof-object? expr))

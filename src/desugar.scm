@@ -222,3 +222,9 @@
               ,(rewrite (cadddr expr)))
            `(if ,(rewrite (cadr expr)) ,(rewrite (caddr expr)) (begin))))
         (#t (map rewrite expr))))
+(define (make-rewrite-rules syntax-bindings)
+  (lambda (statement return)
+    (if (and (pair? statement) (eq? (car statement) 'define-syntax))
+      (set! syntax-bindings
+        (compile-syntax-rules (cadr statement) (caddr statement)))
+      (return (rewrite statement)))))
