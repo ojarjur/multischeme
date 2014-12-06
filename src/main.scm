@@ -16,7 +16,7 @@
 (load "src/multitask.scm")
 
 (define (write-with-newline expr) (begin (write expr) (newline)))
-(define rewrite-rules (make-rewrite-rules '()))
+(define rewrite-rules initial-rewrite-rules)
 (define defined-globals
   (append
     extended-primitives
