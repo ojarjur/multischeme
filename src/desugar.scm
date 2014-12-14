@@ -15,6 +15,7 @@
 ;; Helper procedures for simplifying statements before cps-transforming them ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define (compile-syntax-rules name reserved-words patterns)
+  ;; TODO: Make the syntax rules hygenic
   (define (matches-tail-pattern? expr pattern prev-pattern)
     (if (and (pair? pattern) (equal? (car pattern) '...))
       (or (null? expr)
@@ -35,6 +36,9 @@
           (#t (eq? pattern expr))))
   (define (bind-pattern expr pattern)
     (cond ((symbol? pattern) (list (cons pattern expr)))
+          ;; TODO: The semantics of ... are more complicated than this.
+          ;; For instance, if ((a b ...) ...) is bound to ((1 2) (3 4) (5 6)),
+          ;; then the replacement (a ...) should become (1 3 5).
           ((and (pair? pattern) (equal? (cdr pattern) '(...)))
            (list (cons pattern expr)))
           ((pair? pattern)
@@ -65,6 +69,7 @@
       no-op-syntax-rules))
   (make-syntax-rules patterns))
 (define (rewrite syntax-bindings statement)
+  ;; TODO: Make nested bindings mask syntax bindings
   (define (rewrite-named-let name bindings rewritten-body)
     (cons `(letrec ((,name (lambda ,(map car bindings) ,rewritten-body)))
              ,name)
@@ -188,6 +193,7 @@
              (rewrite-let (cadr expr) (rewrite-statements (cddr expr)))))
           ((eq? (car expr) 'letrec)
            (rewrite-letrec (cadr expr) (rewrite-statements (cddr expr))))
+          ;; TODO: Support let-syntax and letrec-syntax
           ((eq? (car expr) 'do)
            (rewrite-do (cadr expr) (caddr expr) (cdddr expr)))
           ((eq? (car expr) 'define)
