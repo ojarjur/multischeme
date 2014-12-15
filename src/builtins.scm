@@ -17,6 +17,9 @@
 ;; This file defines standard procedures that are expected in any Scheme ;;
 ;; implementation, but which should not be treated as atomic primitives. ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TODO: This should be extended to include read, eval, and the various  ;;
+;; environment procedures.                                               ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define builtins
   '((define (reverse elements)
       (define (rreverse remaining-elements result)
@@ -46,4 +49,25 @@
     (define (newline . args)
       (write-char
         #\newline
-        (if (pair? args) (car args) (current-output-port))))))
+        (if (pair? args) (car args) (current-output-port))))
+    (define (read-string k . args)
+      (let ((port (if (null? args) (current-input-port) (car args))))
+        (define (recursive-read k chars)
+          (cond ((not (> k 0)) (list->string (reverse chars)))
+                ((not (char-ready? port)) (recursive-read k chars))
+                (else
+                 (let ((char (read-char port)))
+                   (if (eof-object? char)
+                     (list->string (reverse chars))
+                     (recursive-read (- k 1) (cons char chars)))))))
+        (recursive-read k '())))
+    (define (read-line . args)
+      (let ((port (if (null? args) (current-input-port) (car args))))
+        (define (recursive-read chars)
+          (if (char-ready? port)
+            (let ((char (read-char port)))
+              (if (or (eof-object? char) (eq? char #\newline))
+                (list->string (reverse chars))
+                (recursive-read (cons char chars))))
+            (recursive-read chars)))
+        (recursive-read '())))))
