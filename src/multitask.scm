@@ -477,16 +477,24 @@
     (define output-port (current-output-port))
     (define _read-char
       (lambda (continuation scheduler done-handler . args)
-        (continuation
-          scheduler
-          done-handler
-          (read-char (if (pair? args) (car args) input-port)))))
+        (let ((port (if (pair? args) (car args) input-port)))
+          (if (char-ready? port)
+              (continuation scheduler done-handler (read-char port))
+              (scheduler (lambda (scheduler done-handler)
+                           (_read-char continuation
+                                       scheduler
+                                       done-handler
+                                       port)))))))
     (define _peek-char
       (lambda (continuation scheduler done-handler . args)
-        (continuation
-          scheduler
-          done-handler
-          (peek-char (if (pair? args) (car args) input-port)))))
+        (let ((port (if (pair? args) (car args) input-port)))
+          (if (char-ready? port)
+              (continuation scheduler done-handler (peek-char port))
+              (scheduler (lambda (scheduler done-handler)
+                           (_peek-char continuation
+                                       scheduler
+                                       done-handler
+                                       port)))))))
     (define _char-ready?
       (lambda (continuation scheduler done-handler . args)
         (continuation
